@@ -5,6 +5,7 @@ import random
 import platform
 import shlex
 import shutil
+import ffmpeg
 from typing import List, Optional, Tuple
 from .constants import (
     FFMPEG_PATH, FILTERS, OVERLAY_POSITIONS,
@@ -22,6 +23,15 @@ if not os.path.exists(FFMPEG_PATH_EFFECTIVE):
         print(
             f"Warning: FFmpeg not found in system PATH either. Processing might fail if '{FFMPEG_PATH}' is incorrect.")
 
+def has_audio_stream(video_path: str) -> bool:
+    try:
+        probe = ffmpeg.probe(video_path)
+        for stream in probe['streams']:
+            if stream['codec_type'] == 'audio':
+                return True
+    except Exception:
+            pass
+    return False
 
 def run_ffmpeg(cmd: List[str], input_file_for_log: str = "input"):
     """
@@ -138,40 +148,35 @@ def process_single(
         strip_metadata: bool = False,
         hardware: str = "cpu"
 ):
-    """Обрабатывает один видео или GIF файл с применением всех настроек."""
     is_gif_input = in_path.lower().endswith('.gif')
     is_gif_overlay = overlay_file and overlay_file.lower().endswith('.gif')
     cmd = [FFMPEG_PATH_EFFECTIVE, "-y"]
     input_streams = []
+
     if is_gif_input:
         cmd.extend(["-stream_loop", "-1", "-i", in_path])
-        input_streams.append({"type": "video", "index": len(input_streams), "path": in_path})
         cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"])
-        input_streams.append({"type": "audio", "index": len(input_streams), "source": "lavfi"})
-        main_video_stream_label = f"[{input_streams[0]['index']}:v]"
-        main_audio_stream_label = f"[{input_streams[1]['index']}:a]"
+        main_video_stream_label = "[0:v]"
+        main_audio_stream_label = "[1:a]"
         has_real_audio = False
     else:
         cmd.extend(["-i", in_path])
-        input_streams.append({"type": "video+audio", "index": len(input_streams), "path": in_path})
-        main_video_stream_label = f"[{input_streams[0]['index']}:v]"
-        main_audio_stream_label = f"[{input_streams[0]['index']}:a]"
-        has_real_audio = True
+        main_video_stream_label = "[0:v]"
+        main_audio_stream_label = "[0:a]"
+        has_real_audio = has_audio_stream(in_path)
 
     overlay_stream_label = None
     if overlay_file and os.path.exists(overlay_file):
-        overlay_input_details = {"type": "overlay", "index": len(input_streams), "path": overlay_file}
         if is_gif_overlay:
             cmd.extend(["-stream_loop", "-1", "-i", overlay_file])
         else:
             cmd.extend(["-i", overlay_file])
-        input_streams.append(overlay_input_details)
-        overlay_stream_label = f"[{overlay_input_details['index']}:v]"
+        overlay_stream_label = f"[{len(cmd) // 2 - 1}:v]"
 
-    filter_complex_parts = []
-    last_video_node = main_video_stream_label
     target_w, target_h = REELS_WIDTH, REELS_HEIGHT
     is_reels_format = (output_format == REELS_FORMAT_NAME)
+    filter_complex_parts = []
+    last_video_node = main_video_stream_label
 
     if is_reels_format:
         if blur_background:
@@ -190,6 +195,7 @@ def process_single(
             )
         last_video_node = "[formatted]"
 
+    # Цветовые фильтры
     applied_color_filters = []
     for f_name in filters:
         f_template = FILTERS.get(f_name)
@@ -225,24 +231,19 @@ def process_single(
         filter_complex_parts.append(f"{last_video_node}{chain}[filtered]")
         last_video_node = "[filtered]"
 
+    # Zoom
     zoom_factor = zoom_p / 100.0
     if abs(zoom_factor - 1.0) > 1e-5:
         zm = []
-        if zoom_factor >= 1.0:
-            zm.append(f"scale=iw*{zoom_factor}:ih*{zoom_factor}:flags=bicubic")
-            if is_reels_format:
-                zm.append(f"crop={target_w}:{target_h}:(in_w-{target_w})/2:(in_h-{target_h})/2")
-            else:
-                zm.append(
-                    f"crop=iw/{zoom_factor}:ih/{zoom_factor}:(in_w-iw/{zoom_factor})/2:(in_h-ih/{zoom_factor})/2"
-                )
+        zm.append(f"scale=iw*{zoom_factor}:ih*{zoom_factor}:flags=bicubic")
+        if is_reels_format:
+            zm.append(f"crop={target_w}:{target_h}:(in_w-{target_w})/2:(in_h-{target_h})/2")
         else:
-            zm.append(f"scale=iw*{zoom_factor}:ih*{zoom_factor}:flags=bicubic")
-            if is_reels_format:
-                zm.append(f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black")
+            zm.append(f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black")
         filter_complex_parts.append(f"{last_video_node}{','.join(zm)}[zoomed]")
         last_video_node = "[zoomed]"
 
+    # Скорость
     speed_factor = speed_p / 100.0
     last_audio_node = main_audio_stream_label
     audio_speed_applied = False
@@ -267,13 +268,18 @@ def process_single(
                 last_audio_node = "[speed_a]"
                 audio_speed_applied = True
 
-    if audio_speed_applied:
-        filter_complex_parts.append(f"{last_audio_node}anull[audio_final]")
+    # Обработка аудио (условная)
+    if has_real_audio and not mute_audio:
+        if audio_speed_applied:
+            filter_complex_parts.append(f"{last_audio_node}anull[audio_final]")
+            last_audio_node = "[audio_final]"
+        else:
+            filter_complex_parts.append(f"{main_audio_stream_label}anull[audio_final]")
+            last_audio_node = "[audio_final]"
     else:
-        filter_complex_parts.append(f"{main_audio_stream_label}anull[audio_final]")
+        last_audio_node = None  # звука нет или отключён
 
-    last_audio_node = "[audio_final]"
-
+    # Наложение
     if overlay_stream_label:
         pos = OVERLAY_POSITIONS.get(overlay_pos, "x=(W-w)/2:y=(H-h)/2")
         filter_complex_parts.append(f"{overlay_stream_label}format=rgba[ovl_alpha]")
@@ -284,15 +290,19 @@ def process_single(
     fc_string = ";".join(filter_complex_parts)
     cmd.extend(["-filter_complex", fc_string])
     cmd.extend(["-map", "[vout]"])
-    if mute_audio or not has_real_audio:
-        cmd.append("-an")
-    else:
+
+    if last_audio_node:
         cmd.extend(["-map", last_audio_node, "-c:a", "aac", "-b:a", "128k"])
+    else:
+        cmd.append("-an")  # отключить аудиодорожку
+
     cmd.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "24"])
+
     if strip_metadata:
         cmd.extend(["-map_metadata", "-1", "-map_chapters", "-1"])
+
     if not is_gif_input:
         cmd.append("-shortest")
-    cmd.append(out_path)
 
+    cmd.append(out_path)
     run_ffmpeg(cmd, input_file_for_log=in_path)
