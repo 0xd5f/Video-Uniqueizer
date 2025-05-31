@@ -446,26 +446,28 @@ class VideoUnicApp(QMainWindow):
         if not video_files:
             QMessageBox.warning(self, "Нет файлов", "Добавьте хотя бы один видео или GIF файл.")
             return
+
         out_dir = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения результатов")
         if not out_dir:
             return
+
         strip_metadata = self.main_widget.strip_meta_checkbox.isChecked()
         output_format = self.main_widget.output_format_combo.currentText()
         blur_background = (self.main_widget.blur_background_checkbox.isChecked()
                            if output_format == REELS_FORMAT_NAME else False)
         selected_filters = [item.text() for item in self.main_widget.filter_list.selectedItems()]
 
-        zoom_mode = "dynamic" if self.zoom_dynamic_radio.isChecked() else "static"
-        zoom_min = (self.zoom_min_spin.value() if zoom_mode == "dynamic"
-                    else self.zoom_static_spin.value())
-        zoom_max = (self.zoom_max_spin.value() if zoom_mode == "dynamic"
-                    else self.zoom_static_spin.value())
+        zoom_mode = "dynamic" if self.main_widget.zoom_dynamic_radio.isChecked() else "static"
+        zoom_min = (self.main_widget.zoom_min_spin.value() if zoom_mode == "dynamic"
+                    else self.main_widget.zoom_static_spin.value())
+        zoom_max = (self.main_widget.zoom_max_spin.value() if zoom_mode == "dynamic"
+                    else self.main_widget.zoom_static_spin.value())
 
-        speed_mode = "dynamic" if self.speed_dynamic_radio.isChecked() else "static"
-        speed_min = (self.speed_min_spin.value() if speed_mode == "dynamic"
-                     else self.speed_static_spin.value())
-        speed_max = (self.speed_max_spin.value() if speed_mode == "dynamic"
-                     else self.speed_static_spin.value())
+        speed_mode = "dynamic" if self.main_widget.speed_dynamic_radio.isChecked() else "static"
+        speed_min = (self.main_widget.speed_min_spin.value() if speed_mode == "dynamic"
+                     else self.main_widget.speed_static_spin.value())
+        speed_max = (self.main_widget.speed_max_spin.value() if speed_mode == "dynamic"
+                     else self.main_widget.speed_static_spin.value())
 
         overlay_file = self.main_widget.overlay_path.text().strip() or None
         if overlay_file and not os.path.exists(overlay_file):
