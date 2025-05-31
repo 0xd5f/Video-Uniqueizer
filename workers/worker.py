@@ -1,4 +1,4 @@
-# workers/worker.py
+import subprocess
 from PyQt5.QtCore import QThread, pyqtSignal
 import os
 import random
