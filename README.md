@@ -1,3 +1,4 @@
+![image](https://github.com/user-attachments/assets/4e3db8a7-be30-40fc-9e60-4c3ff79918b2)
 
 Уникализатор видео для Reels, TikTok, Shorts, Instagram, VK, Telegram и других соцсетей.
 
