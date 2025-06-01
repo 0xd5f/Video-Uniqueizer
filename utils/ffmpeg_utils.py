@@ -103,7 +103,7 @@ def get_video_dimensions(path: str) -> Tuple[int, int]:
             return 0, 0
     cmd = [
         ffprobe_path_effective, "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", path
+        "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0","-c:a", "copy", path
     ]
     try:
         creationflags = 0
@@ -269,7 +269,7 @@ def process_single(
                 audio_speed_applied = True
 
     # Обработка аудио (условная)
-    if has_real_audio and not mute_audio:
+    if not mute_audio:
         if audio_speed_applied:
             filter_complex_parts.append(f"{last_audio_node}anull[audio_final]")
             last_audio_node = "[audio_final]"
@@ -294,7 +294,7 @@ def process_single(
     if last_audio_node:
         cmd.extend(["-map", last_audio_node, "-c:a", "aac", "-b:a", "128k"])
     else:
-        cmd.append("-an")  # отключить аудиодорожку
+        cmd.append("-an")
 
     cmd.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "24"])
 
