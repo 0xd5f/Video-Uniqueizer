@@ -3,15 +3,17 @@ import os
 import sys
 import random
 from typing import List
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal
+from PyQt5.QtCore import Qt, QPoint
 from PyQt5.QtGui import QFontMetrics, QIcon
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QAbstractItemView, QFileDialog, QSpinBox,
     QLineEdit, QMessageBox, QProgressBar, QComboBox,
-    QGroupBox, QRadioButton, QButtonGroup, QCheckBox, QListWidgetItem, QMenu
+    QGroupBox, QRadioButton, QButtonGroup, QCheckBox, QListWidgetItem, QMenu, QTabWidget
 )
 from workers.worker import Worker
+from ui.widgets import DropListWidget
+from ui.reels_tab import ReelsTab
 from utils.file_utils import is_video_file, find_videos_in_folder
 from utils.constants import FILTERS, OVERLAY_POSITIONS, REELS_FORMAT_NAME
 
@@ -35,56 +37,6 @@ OUTPUT_FORMATS = [
     "Snapchat (1080x1920)",
     "Pinterest (1000x1500)"
 ]
-
-
-class DropListWidget(QListWidget):
-    files_dropped = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setDragEnabled(False)
-        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            added = False
-            for url in event.mimeData().urls():
-                fp = url.toLocalFile()
-                if os.path.isdir(fp):
-                    for v in find_videos_in_folder(fp):
-                        if is_video_file(v) and not self.is_already_added(v):
-                            it = QListWidgetItem(v)
-                            it.setData(Qt.UserRole, v)
-                            self.addItem(it)
-                            added = True
-                else:
-                    if (is_video_file(fp) or fp.lower().endswith('.gif')) and not self.is_already_added(fp):
-                        it = QListWidgetItem(fp)
-                        it.setData(Qt.UserRole, fp)
-                        self.addItem(it)
-                        added = True
-            if added:
-                self.files_dropped.emit()
-        else:
-            event.ignore()
-
-    def is_already_added(self, file_path):
-        return any(self.item(i).data(Qt.UserRole) == file_path for i in range(self.count()))
 
 
 class MainProcessingWidget(QWidget):
@@ -416,7 +368,11 @@ class VideoUnicApp(QMainWindow):
         else:
             print(f"Warning: Icon not found at {icon_path}")
         self.main_widget = MainProcessingWidget(parent=self)
-        self.setCentralWidget(self.main_widget)
+        self.reels_tab = ReelsTab(parent=self)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.main_widget, "Обработка")
+        self.tabs.addTab(self.reels_tab, "Уникализация Reels")
+        self.setCentralWidget(self.tabs)
         self.apply_stylesheet("light")
         self.main_widget.process_button.clicked.connect(self.start_processing)
         self.thread = None
@@ -542,6 +498,16 @@ class VideoUnicApp(QMainWindow):
         self.main_widget.process_button.setEnabled(True)
 
     def closeEvent(self, event):
+        if self.reels_tab.is_running():
+            reply = QMessageBox.question(
+                self, 'Подтверждение',
+                "Идет уникализация видео. Остановить и выйти?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            self.reels_tab.stop_and_wait()
         if self.thread and self.thread.isRunning():
             reply = QMessageBox.question(
                 self, 'Подтверждение',

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Логи приложения
+*.log
+
+# Бинарники FFmpeg (скачиваются отдельно, см. README)
+ffmpeg/
+
+# Результаты обработки
+output/
+*_unique/
+
+# IDE и локальные настройки
+.idea/
+.vscode/
+.claude/
